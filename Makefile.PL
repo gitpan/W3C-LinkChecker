@@ -6,10 +6,9 @@ eval {
   if ($LWP::VERSION eq "5.76") {
     print STDERR <<'EOF';
 
-*** Warning: due to a bug in libwww-perl version 5.76, the link checker
-*** will detect many spurious redirect loops, and may follow redirects to
-*** file: URLs.  It is not recommended to use this version of libwww-perl
-*** with the link checker.
+*** Warning: it is not recommended to use this version of link checker with
+*** libwww-perl version 5.76.  Version 5.76 of libwww-perl has a bug which
+*** may cause the link checker to follow redirects to file: URLs.
 
 EOF
   }
@@ -25,11 +24,14 @@ WriteMakefile(
                      CGI             => 0,
                      Config::General => 2.06,
                      HTML::Parser    => 3.00,
-                     LWP::UserAgent  => 0,
+                     LWP             => 5.66,
                      Net::IP         => 0,
                      Term::ReadKey   => 2.00,
                      Time::HiRes     => 0,
                      URI             => 0,
+                     # For the test suite:
+                     Test::Simple    => 0,
+                     File::Spec      => 0,
                    },
   EXE_FILES     => [ 'bin/checklink' ],
   MAN1PODS      => { 'bin/checklink.pod' =>

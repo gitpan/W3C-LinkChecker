@@ -5,8 +5,8 @@
   <head>
     <title>W3C Link Checker Documentation</title>
     <link rev="made" href="mailto:www-validator@w3.org" />
-    <style type="text/css" media="all">@import "checklink.css";</style>
-    <meta name="revision" content="$Id: checklink.html,v 1.10 2004/03/31 19:22:19 ville Exp $" />
+    <style type="text/css" media="all">@import "linkchecker.css";</style>
+    <meta name="revision" content="$Id: checklink.html,v 1.22 2004/07/11 16:46:42 ville Exp $" />
   </head>
 
   <body>
@@ -17,13 +17,20 @@
       Link Checker</h1>
     </div>
 
-    <div id="main">
+    <ul class="navbar" id="menu">
+        <li><a href="http://validator.w3.org/checklink" accesskey="l" title="The Link Checker Service at W3C">Link Checker</a></li>
+        <li><a href="http://search.cpan.org/dist/W3C-LinkChecker/" accesskey="i" title="Download the source / Install this service">Download</a></li>
+        <li>
+        <a href="http://validator.w3.org" accesskey="m" title="Validate your markup with the W3C Markup Validation Service">Validator</a></li>
+    </ul>
 
+    <div id="main">
     <ul>
       <li><a href="#about">About this service</a></li>
       <li><a href="#what">What it does</a></li>
       <li><a href="#online">Use it online</a></li>
       <li><a href="#install">Install it locally</a></li>
+      <li><a href="#bot">Robots exclusion</a></li>
       <li><a href="#csb">Comments, suggestions and bugs</a></li>
     </ul>
 
@@ -94,8 +101,10 @@
 
     <p>
       In the online version (and in general, when run as a CGI script),
-      the number of documents that can be checked recursively is limited
-      and there is a delay between each document checked to avoid abuses.
+      the number of documents that can be checked recursively is limited.
+      Both the command line version and the online one sleep at least one
+      second between requests to each server to avoid abuses and target
+      server congestion.
     </p>
 
     <h2><a name="install" id="install">Install it locally</a></h2>
@@ -127,7 +136,7 @@
 	  <li><a href="http://search.cpan.org/dist/CGI.pm/">CGI.pm</a> (required for CGI mode only)</li>
           <li><a href="http://search.cpan.org/dist/Config-General/">Config-General</a> (optional, version 2.06 or newer; required only for reading the (optional) configuration file)</li>
 	  <li><a href="http://search.cpan.org/dist/HTML-Parser/">HTML-Parser</a> (version 3.00 or newer)</li>
-	  <li><a href="http://search.cpan.org/dist/libwww-perl/">libwww-perl</a> (version 5.60 or newer if you want HTTP/1.1 with <code>Keep-Alive</code>; version 5.70 or newer recommended, except for 5.76 which has a bug that causes the link checker to detect many spurious redirect loops and to follow redirects to <code>file:</code> URLs)</li>
+	  <li><a href="http://search.cpan.org/dist/libwww-perl/">libwww-perl</a> (version 5.66 or newer; version 5.70 or newer recommended, except for 5.76 which has a bug that may cause the link checker follow redirects to <code>file:</code> URLs)</li>
           <li><a href="http://search.cpan.org/dist/Net-IP/">Net-IP</a></li>
           <li><a href="http://search.cpan.org/dist/TermReadKey/">TermReadKey</a> (optional but recommended; required only in command line mode for password input)</li>
 	  <li><a href="http://search.cpan.org/dist/Time-HiRes/">Time-HiRes</a></li>
@@ -185,6 +194,43 @@
       for more information.
     </p>
 
+    <h2><a name="bot" id="bot">Robots exclusion</a></h2>
+
+    <p>
+      As of version 4.0, the link checker honors
+      <a href="http://www.robotstxt.org/wc/exclusion.html#robotstxt">robots exclusion rules</a>.  To place rules specific to the W3C Link Checker in
+      <code>/robots.txt</code> files, sites can use the
+      <code>W3C-checklink</code> user agent string.  For example, to allow
+      the link checker to access all documents on a server and to disallow
+      all other robots, one could use the following:
+    </p>
+
+    <pre>
+User-Agent: *
+Disallow: /
+
+User-Agent: W3C-checklink
+Disallow:
+</pre>
+
+    <p>
+      Robots exlusion support in the link checker is based on the
+      <a href="http://search.cpan.org/dist/libwww-perl/lib/LWP/RobotUA.pm">LWP::RobotUA</a>
+      Perl module.  It currently supports the
+      "<a href="http://www.robotstxt.org/wc/norobots.html">original 1994 version</a>"
+      of the standard.  The robots META tag, ie.
+      <code>&lt;meta name="robots" content="..."&gt;</code>, is not supported.
+      Other than that, the link checker's implementation goes all the way
+      in trying to honor robots exclusion rules; if a
+      <code>/robots.txt</code> disallows it, not even the first document
+      submitted as the root for a link checker run is fetched.
+    </p>
+
+    <p>
+      Note that <code>/robots.txt</code> rules affect only user agents
+      that honor it; it is not a generic method for access control.
+    </p>
+
     <h2><a name="csb" id="csb">Comments, suggestions and bugs</a></h2>
 
     <p>
@@ -206,7 +252,7 @@
         alt="Valid XHTML 1.0!" /></a>
       <a title="Send Feedback for the W3C Link Checker"
         href="http://validator.w3.org/feedback.html">The W3C Validator Team</a><br />
-      $Date: 2004/03/31 19:22:19 $
+      $Date: 2004/07/11 16:46:42 $
     </address>
     <p class="copyright">
       <a rel="Copyright" href="http://www.w3.org/Consortium/Legal/ipr-notice#Copyright">Copyright</a> &copy; 1994-2004

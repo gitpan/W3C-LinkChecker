@@ -5,7 +5,7 @@
 # (c) 1999-2004 World Wide Web Consortium
 # based on Renaud Bruyeron's checklink.pl
 #
-# $Id: checklink,v 4.4 2004/07/20 14:57:24 ville Exp $
+# $Id: checklink,v 4.14 2004/11/23 20:50:46 ville Exp $
 #
 # This program is licensed under the W3C(r) Software License:
 #       http://www.w3.org/Consortium/Legal/copyright-software
@@ -33,7 +33,7 @@ $ENV{PATH} = ''; # undef would output warnings with Perl 5.6.1's Cwd.pm.
 
 package W3C::UserAgent;
 
-use LWP::RobotUA qw();
+use LWP::RobotUA 1.19 qw();
 # @@@ Needs also W3C::LinkChecker but can't use() it here.
 
 @W3C::UserAgent::ISA = qw(LWP::RobotUA);
@@ -92,9 +92,6 @@ use HTML::Entities       qw();
 use HTML::Parser    3.00 qw();
 use HTTP::Request        qw();
 use HTTP::Response       qw();
-use Net::hostent         qw(gethostbyname);
-use Net::IP              qw();
-use Socket               qw(inet_ntoa);
 use Time::HiRes          qw();
 use URI                  qw();
 use URI::Escape          qw();
@@ -109,14 +106,13 @@ use constant RC_DNS_ERROR  => -2;
 BEGIN
 {
   # Version info
-  $PACKAGE       = 'W3C Link Checker';
-  $PROGRAM       = 'W3C-checklink';
-  $VERSION       = '4.0';
-  my ($cvsver)   = q$Revision: 4.4 $ =~ /(\d+[\d\.]*\.\d+)/;
-  $REVISION      = sprintf('version %s [%s] (c) 1999-2004 W3C',
-                           $VERSION, $cvsver);
-  $AGENT         = sprintf('%s/%s [%s] %s',
-                           $PROGRAM, $VERSION, $cvsver,LWP::RobotUA->_agent());
+  $PACKAGE     = 'W3C Link Checker';
+  $PROGRAM     = 'W3C-checklink';
+  $VERSION     = '4.1';
+  $REVISION    = sprintf('version %s (c) 1999-2004 W3C', $VERSION);
+  my ($cvsver) = q$Revision: 4.14 $ =~ /(\d+[\d\.]*\.\d+)/;
+  $AGENT       = sprintf('%s/%s [%s] %s',
+                         $PROGRAM, $VERSION, $cvsver, LWP::RobotUA->_agent());
 
   # Pull in mod_perl modules if applicable.
   if ($ENV{MOD_PERL}) {
@@ -166,9 +162,10 @@ $@
     'http://validator.w3.org/docs/linkchecker.css';
 
   $DocType = '<!DOCTYPE html PUBLIC "-//W3C//DTD HTML 4.01//EN">';
-  $Head = <<EOF;
+  $Head = sprintf(<<'EOF', HTML::Entities::encode($AGENT), $Cfg{Style_URI});
 <meta http-equiv="Content-Script-Type" content="text/javascript">
-<link rel="stylesheet" type="text/css" href="$Cfg{Style_URI}">
+<meta name="generator" content="%s">
+<link rel="stylesheet" type="text/css" href="%s">
 EOF
 
   # Trusted environment variables that need laundering in taint mode.
@@ -214,6 +211,22 @@ my %Opts =
   );
 undef $cmdline;
 
+unless ($Opts{Allow_Private_IPs}) {
+  eval {
+    require Net::IP;
+    require Socket;
+    Socket->import('inet_ntoa');
+    require Net::hostent;
+  };
+  if ($@) {
+    die <<".EOF.";
+Allow_Private_IPs is false; this feature requires the Net::IP, Socket, and
+Net::hostent modules:
+$@
+.EOF.
+  }
+}
+
 # Global variables
 # What is our query?
 my $query;
@@ -239,6 +252,13 @@ if (defined($Opts{Trusted})) {
   eval { $Opts{Trusted} = qr/$Opts{Trusted}/io; };
   &usage(1, "Error in trusted domains regexp: $@") if $@;
 }
+
+my $ua = W3C::UserAgent->new($AGENT); # @@@ TODO: admin address
+# @@@ make number of keep-alive connections customizable
+$ua->conn_cache({ total_capacity => 1}); # 1 keep-alive connection
+$ua->delay($Opts{Sleep_Time}/60);
+$ua->timeout($Opts{Timeout});
+$ua->proxy('http', 'http://' . $Opts{HTTP_Proxy}) if $Opts{HTTP_Proxy};
 
 if ($Opts{Command_Line}) {
 
@@ -410,16 +430,23 @@ sub parse_arguments ()
              't|timeout=i'     => \$Opts{Timeout},
              'S|sleep=i'       => \$Opts{Sleep_Time},
              'L|languages=s'   => \$Opts{Accept_Language},
-             'n|noacclanguage' => sub { warn("*** Warning: The " .
-                                        "-n/--noacclanguage option is " .
-                                        "deprecated and has no effect.\n"); },
              'D|depth=i'       => sub { $Opts{Depth} = $_[1]
                                           unless $_[1] == 0; },
              'd|domain=s'      => \$Opts{Trusted},
-             'y|proxy=s'       => \$Opts{HTTP_Proxy},
              'masquerade=s'    => \$masq,
              'hide-same-realm' => \$Opts{Hide_Same_Realm},
              'V|version'       => \&version,
+             # Deprecated options:
+             'n|noacclanguage' => sub { warn("*** Warning: The " .
+                                        "-n/--noacclanguage option is " .
+                                        "deprecated and has no effect.\n");
+                                      },
+             'y|proxy=s'       => sub { warn("*** Warning: The -y/--proxy " .
+                                        "option is deprecated, use the " .
+                                        "http_proxy\n             " .
+                                        "environment variable instead.\n");
+                                        $Opts{HTTP_Proxy} = $_[1];
+                                      },
             )
     || usage(1);
 
@@ -497,12 +524,12 @@ Options:
                             (default: $trust).
  --masquerade \"BASE1 BASE2\" Masquerade base URI BASE1 as BASE2.  See the
                             manual page for more information.
- -y, --proxy PROXY          Specify an HTTP proxy server.
  -H, --html                 HTML output.
  -?, -h, --help             Show this message and exit.
  -V, --version              Output version information and exit.
 
-See \"perldoc Net::FTP\" for information about various environment variables
+See \"perldoc LWP\" for information about proxy server support,
+\"perldoc Net::FTP\" for information about various environment variables
 affecting FTP connections and \"perldoc Net::NNTP\" for setting a default
 NNTP server for news: URIs.
 
@@ -666,6 +693,12 @@ Settings used:
 EOF
   }
 
+  if ($Opts{Summary_Only}) {
+    if ($Opts{HTML}) { print '<p>'}
+    print 'This may take some time';
+    if ($Opts{HTML}) { print '... (<a href="'.$Cfg{Doc_URI}.'#wait">why?</a>)</p>'}
+    else { print " if the document has many links to check.\n"}
+  }
   # Record that we have processed this resource
   $processed{$absolute_uri} = 1;
   # Parse the document
@@ -736,7 +769,12 @@ EOF
     # Don't check mailto: URI's
     next if ($u =~ m/^mailto:/);
 
-    &hprintf("Checking link %s\n", $u) unless $Opts{Summary_Only};
+    if ($Opts{Summary_Only}) {
+      # Hack: avoid browser/server timeouts in summary only CGI mode, bug 896
+      print ' ' if ($Opts{HTML} && !$Opts{Command_Line});
+    } else {
+      &hprintf("Checking link %s\n", $u);
+    }
 
     # Check that a link is valid
     &check_validity($uri, $u,
@@ -967,12 +1005,6 @@ sub get_uri ($$;$\%$$$$)
   $start = &get_timestamp() unless defined($start);
 
   # Prepare the query
-  my $ua = W3C::UserAgent->new($AGENT); # @@@ TODO: admin address
-  # @@@ make number of keep-alive connections customizable
-  $ua->conn_cache({ total_capacity => 1}); # 1 keep-alive connection
-  $ua->delay($Opts{Sleep_Time}/60);
-  $ua->timeout($Opts{Timeout});
-  $ua->proxy('http', 'http://' . $Opts{HTTP_Proxy}) if $Opts{HTTP_Proxy};
 
   # Do we want printouts of progress?
   my $verbose_progress =
@@ -1006,8 +1038,7 @@ sub get_uri ($$;$\%$$$$)
   # Get the results
   # Record the very first response
   if (! defined($code)) {
-    $code = $ua->{FirstResponse};
-    $message = $ua->{FirstMessage};
+    ($code, $message) = delete(@$ua{qw(FirstResponse FirstMessage)});
   }
   # Authentication requested?
   if ($response->code() == 401 &&
@@ -1360,7 +1391,7 @@ sub check_validity ($$$\%\%)
     }
     # Do it then
     $p = &parse_document($uri, $response->base(),
-                         $response->as_string(), 0, $want_links);
+                         $response->content(), 0, $want_links);
   } else {
     # We already had the information
     $p->{Anchors} = $results{$uri}{parsing}{Anchors};
@@ -1406,7 +1437,7 @@ to specify trusted domains.
 EOF
   } else {
 
-    printf("Status: 401 Authorization Required\nWWW-Authenticate: %s\nConnection: close\nContent-Language: en\nContent-Type: text/html; charset=iso-8859-1\n\n", $r->headers->www_authenticate);
+    printf("Status: 401 Authorization Required\nWWW-Authenticate: %s\nConnection: close\nContent-Language: en\nContent-Type: text/html; charset=utf-8\n\n", $r->headers->www_authenticate);
 
     printf("%s
 <html lang=\"en\">
@@ -1773,19 +1804,19 @@ sub code_shown ($$)
 sub ip_allowed ($)
 {
   my ($uri) = @_;
+  return undef if $Opts{Allow_Private_IPs}; # Short-circuit
+
   my $hostname = undef;
   eval { $hostname = $uri->host() }; # Not all URIs implement host()...
   return undef unless $hostname;
 
   my $addr = my $iptype = my $resp = undef;
-  if (my $host = gethostbyname($hostname)) {
+  if (my $host = Net::hostent::gethostbyname($hostname)) {
     $addr = inet_ntoa($host->addr()) if $host->addr();
     if ($addr && (my $ip = Net::IP->new($addr))) {
       $iptype = $ip->iptype();
     }
   }
-  $iptype = 'PUBLIC'
-    if ($iptype && $iptype eq 'PRIVATE' && $Opts{Allow_Private_IPs});
   if ($iptype && $iptype ne 'PUBLIC') {
     $resp = HTTP::Response->new(403,
     'Checking non-public IP address disallowed by link checker configuration');
@@ -1967,7 +1998,7 @@ sub html_header ($;$$)
   my $headers = '';
   if (! $Opts{Command_Line}) {
     $headers .= "Cache-Control: no-cache\nPragma: no-cache\n" if $doform;
-    $headers .= "Content-Type: text/html; charset=iso-8859-1\n";
+    $headers .= "Content-Type: text/html; charset=utf-8\n";
     $headers .= "Set-Cookie: $cookie\n" if $cookie;
     $headers .= "Content-Language: en\n\n";
   }

@@ -2,10 +2,10 @@
 #
 # W3C Link Checker
 # by Hugo Haas <hugo@w3.org>
-# (c) 1999-2004 World Wide Web Consortium
+# (c) 1999-2005 World Wide Web Consortium
 # based on Renaud Bruyeron's checklink.pl
 #
-# $Id: checklink,v 4.14 2004/11/23 20:50:46 ville Exp $
+# $Id: checklink,v 4.20 2005/04/27 15:17:13 ville Exp $
 #
 # This program is licensed under the W3C(r) Software License:
 #       http://www.w3.org/Consortium/Legal/copyright-software
@@ -78,7 +78,15 @@ sub redirect_ok
     # robust way of determining whether something is a LWP "internal" request.
     &W3C::LinkChecker::hprintf("\n%s %s ", $request->method(),$request->uri());
   }
-  return $self->SUPER::redirect_ok($request, $response);
+  return 0 unless $self->SUPER::redirect_ok($request, $response);
+  if (my $res = &W3C::LinkChecker::ip_allowed($request->uri())) {
+    $response->previous($response->clone());
+    $response->request($request);
+    $response->code($res->code());
+    $response->message($res->message());
+    return 0;
+  }
+  return 1;
 }
 
 # -----------------------------------------------------------------------------
@@ -108,15 +116,15 @@ BEGIN
   # Version info
   $PACKAGE     = 'W3C Link Checker';
   $PROGRAM     = 'W3C-checklink';
-  $VERSION     = '4.1';
-  $REVISION    = sprintf('version %s (c) 1999-2004 W3C', $VERSION);
-  my ($cvsver) = q$Revision: 4.14 $ =~ /(\d+[\d\.]*\.\d+)/;
+  $VERSION     = '4.2';
+  $REVISION    = sprintf('version %s (c) 1999-2005 W3C', $VERSION);
+  my ($cvsver) = q$Revision: 4.20 $ =~ /(\d+[\d\.]*\.\d+)/;
   $AGENT       = sprintf('%s/%s [%s] %s',
                          $PROGRAM, $VERSION, $cvsver, LWP::RobotUA->_agent());
 
   # Pull in mod_perl modules if applicable.
   if ($ENV{MOD_PERL}) {
-    eval "require Apache::compat"; # For mod_perl 2
+    eval "require Apache2::compat"; # For mod_perl 2
     require Apache;
   }
 
@@ -675,7 +683,7 @@ EOF
       printf("<p>For reliable link checking results, check
 <a href=\"%s\">HTML validity</a> first.  See also
 <a href=\"%s\">CSS validity</a>.</p>
-<p>Back to the <a href=\"%s\">link checker</a>.</p>\n",
+<p>Back to the <a accesskey=\"1\" href=\"%s\">link checker</a>.</p>\n",
              &encode(sprintf($Cfg{Markup_Validator_URI}, $esc_uri)),
              &encode(sprintf($Cfg{CSS_Validator_URI}, $esc_uri)),
              &encode($Opts{_Self_URI}));
@@ -2038,12 +2046,14 @@ EOF
 sub banner ($)
 {
   my ($title) = @_;
-  printf(<<'EOF', &encode($title), $Cfg{Doc_URI});
+  printf(<<'EOF', &encode($title), $Cfg{Doc_URI}, $Cfg{Doc_URI});
 <div id="banner"><h1 id="title"><a href="http://www.w3.org/" title="W3C"><img alt="W3C" id="logo" src="http://www.w3.org/Icons/w3c_home" height="48" width="72"></a> Link Checker%s</h1></div>
 <ul class="navbar" id="menu">
-  <li><a href="%s" accesskey="d" title="Documentation for this Link Checker Service">Docs</a></li>
-  <li><a href="http://search.cpan.org/dist/W3C-LinkChecker/" accesskey="i" title="Download the source / Install this service">Download</a></li>
-  <li><a href="http://validator.w3.org/" accesskey="m" title="Validate your markup with the W3C Markup Validation Service">Validator</a></li>
+  <li><span class="hideme"><a href="#results1" accesskey="2" title="Skip past navigation to main part of page">Skip Navigation</a> |</span>
+      <a href="%s" accesskey="3" title="Documentation for this Link Checker Service">Docs</a></li>
+  <li><a href="http://search.cpan.org/dist/W3C-LinkChecker/" title="Download the source / Install this service">Download</a></li>
+  <li><a href="%s#csb" title="feedback: comments, suggestions and bugs" accesskey="4">Feedback</a></li>
+  <li><a href="http://validator.w3.org/" title="Validate your markup with the W3C Markup Validation Service">Validator</a></li>
 </ul>
 <div id="main">
 EOF

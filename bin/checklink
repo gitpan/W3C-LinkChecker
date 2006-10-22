@@ -2,10 +2,10 @@
 #
 # W3C Link Checker
 # by Hugo Haas <hugo@w3.org>
-# (c) 1999-2005 World Wide Web Consortium
+# (c) 1999-2006 World Wide Web Consortium
 # based on Renaud Bruyeron's checklink.pl
 #
-# $Id: checklink,v 4.21 2005/05/15 13:46:42 ville Exp $
+# $Id: checklink,v 4.42 2006/10/22 16:48:13 ville Exp $
 #
 # This program is licensed under the W3C(r) Software License:
 #       http://www.w3.org/Consortium/Legal/copyright-software
@@ -61,7 +61,12 @@ sub new
 sub simple_request
 {
   my $self = shift;
-  my $response = $self->W3C::UserAgent::SUPER::simple_request(@_);
+  my $response = do {
+    local $SIG{__WARN__} = sub { # Suppress some warnings, rt.cpan.org #18902
+      warn($_[0]) if ($_[0] && $_[0] !~ /^RobotRules/);
+    };
+    $self->W3C::UserAgent::SUPER::simple_request(@_);
+  };
   if (! defined($self->{FirstResponse})) {
     $self->{FirstResponse} = $response->code();
     $self->{FirstMessage} = $response->message() || '(no message)';
@@ -97,7 +102,7 @@ use vars qw($AGENT $PACKAGE $PROGRAM $VERSION $REVISION
             $DocType $Head $Accept $ContentTypes %Cfg);
 
 use HTML::Entities       qw();
-use HTML::Parser    3.00 qw();
+use HTML::Parser    3.20 qw(); # >= 3.20 for "line" argspec identifier
 use HTTP::Request        qw();
 use HTTP::Response       qw();
 use Time::HiRes          qw();
@@ -109,6 +114,11 @@ use URI::file            qw();
 use constant RC_ROBOTS_TXT => -1;
 use constant RC_DNS_ERROR  => -2;
 
+use constant LINE_UNKNOWN  => -1;
+
+use constant MP2 =>
+  (exists($ENV{MOD_PERL_API_VERSION}) && $ENV{MOD_PERL_API_VERSION} >= 2);
+
 @W3C::LinkChecker::ISA =  qw(HTML::Parser);
 
 BEGIN
@@ -116,17 +126,17 @@ BEGIN
   # Version info
   $PACKAGE     = 'W3C Link Checker';
   $PROGRAM     = 'W3C-checklink';
-  $VERSION     = '4.2.1';
-  $REVISION    = sprintf('version %s (c) 1999-2005 W3C', $VERSION);
-  my ($cvsver) = q$Revision: 4.21 $ =~ /(\d+[\d\.]*\.\d+)/;
+  $VERSION     = '4.3';
+  $REVISION    = sprintf('version %s (c) 1999-2006 W3C', $VERSION);
+  my ($cvsver) = q$Revision: 4.42 $ =~ /(\d+[\d\.]*\.\d+)/;
   $AGENT       = sprintf('%s/%s [%s] %s',
                          $PROGRAM, $VERSION, $cvsver, LWP::RobotUA->_agent());
 
   # Pull in mod_perl modules if applicable.
-  if ($ENV{MOD_PERL}) {
-    eval "require Apache2::compat"; # For mod_perl 2
-    require Apache;
-  }
+  eval {
+    local $SIG{__DIE__};
+    require Apache2::RequestUtil;
+  } if MP2();
 
   my @content_types = qw(application/xhtml+xml text/html);
   $Accept = join(', ', @content_types) . ', */*;q=0.5';
@@ -208,7 +218,7 @@ my %Opts =
     Max_Documents     => 150,  # For the online version.
     User              => undef,
     Password          => undef,
-    Base_Location     => '.',
+    Base_Locations    => [],
     Exclude_Docs      => undef,
     Masquerade        => 0,
     Masquerade_From   => '',
@@ -279,7 +289,8 @@ if ($Opts{Command_Line}) {
 
   &ask_password() if ($Opts{User} && !$Opts{Password});
 
-  my $first = 1;
+  my $is_first = 1;
+  my @bases = @{$Opts{Base_Locations}};
   foreach my $uri (@ARGV) {
     if (!$Opts{Summary_Only}) {
       printf("%s %s\n", $PACKAGE, $REVISION) unless $Opts{HTML};
@@ -287,12 +298,15 @@ if ($Opts{Command_Line}) {
       $Opts{Verbose} = 0;
       $Opts{Progress} = 0;
     }
+    # Reset base locations so that previous URI's given on the command line
+    # won't affect the recursion scope for this URI
+    @{$Opts{Base_Locations}} = @bases;
     # Transform the parameter into a URI
     $uri = &urize($uri);
-    &check_uri($uri, $first, $Opts{Depth});
-    $first &&= 0;
+    &check_uri($uri, $is_first, $Opts{Depth}, undef, 1);
+    $is_first &&= 0;
   }
-  undef $first;
+  undef $is_first;
 
   if ($Opts{HTML}) {
     &html_footer();
@@ -381,14 +395,16 @@ if ($Opts{Command_Line}) {
 
   # All Apache configurations don't set HTTP_AUTHORIZATION for CGI scripts.
   # If we're under mod_perl, there is a way around it...
-  if ($ENV{MOD_PERL}) {
-    my $auth = Apache->request()->header_in('Authorization');
-    $ENV{HTTP_AUTHORIZATION} ||= $auth if $auth;
-  }
+  eval {
+    local $SIG{__DIE__};
+    my $auth = Apache2::RequestUtil->request()->headers_in()->{Authorization};
+    $ENV{HTTP_AUTHORIZATION} = $auth if $auth;
+  } if (MP2() && !$ENV{HTTP_AUTHORIZATION});
 
   $uri =~ s/^\s+//g;
   if ($uri =~ m/^file:/) {
     # Only the http scheme is allowed
+    # TODO: bug 29
     &file_uri($uri);
   } elsif ($uri !~ m/:/) {
     if ($uri =~ m|^//|) {
@@ -416,6 +432,7 @@ sub parse_arguments ()
   Getopt::Long->import('GetOptions');
   Getopt::Long::Configure('bundling', 'no_ignore_case');
   my $masq = '';
+  my @locs = ();
 
   GetOptions('help|h|?'        => sub { usage(0) },
              'q|quiet'         => sub { $Opts{Quiet} = 1;
@@ -431,7 +448,7 @@ sub parse_arguments ()
              'H|html'          => \$Opts{HTML},
              'r|recursive'     => sub { $Opts{Depth} = -1
                                           if $Opts{Depth} == 0; },
-             'l|location=s'    => \$Opts{Base_Location},
+             'l|location=s'    => \@locs,
              'exclude-docs=s', => \$Opts{Exclude_Docs},
              'u|user=s'        => \$Opts{User},
              'p|password=s'    => \$Opts{Password},
@@ -479,6 +496,10 @@ sub parse_arguments ()
     warn("*** Warning: minimum allowed sleep time is 1 second, resetting.\n");
     $Opts{Sleep_Time} = 1;
   }
+
+  push(@{$Opts{Base_Locations}}, map { URI->new($_)->canonical() } @locs);
+
+  $Opts{Depth} = -1 if ($Opts{Depth} == 0 && @locs);
 }
 
 sub version ()
@@ -509,10 +530,11 @@ Options:
  -r, --recursive            Check the documents linked from the first one.
  -D, --depth N              Check the documents linked from the first one to
                             depth N (implies --recursive).
- -l, --location URI         Scope of the documents checked in recursive mode.
-                            By default, for example for
+ -l, --location URI         Scope of the documents checked in recursive mode
+                            (implies --recursive).  Can be specified multiple
+                            times.  If not specified, the default eg. for
                             http://www.w3.org/TR/html4/Overview.html
-                            it would be http://www.w3.org/TR/html4/
+                            would be http://www.w3.org/TR/html4/
  --exclude-docs REGEXP      In recursive mode, do not check links in documents
                             whose URIs match REGEXP.
  -L, --languages LANGS      Accept-Language header to send.  The special value
@@ -620,10 +642,11 @@ sub urize ($)
 # Check for broken links in a resource #
 ########################################
 
-sub check_uri ($$$;$)
+sub check_uri ($$$;$$)
 {
 
-  my ($uri, $first, $depth, $cookie) = @_;
+  my ($uri, $is_first, $depth, $cookie, $is_start) = @_;
+  $is_start ||= $is_first;
 
   my $start = &get_timestamp() unless $Opts{Quiet};
 
@@ -633,11 +656,10 @@ sub check_uri ($$$;$)
   # Can we check the resource? If not, we exit here...
   return -1 if defined($response->{Stop});
 
-  if ($first) {
+  if ($is_start) { # Starting point of a new check, eg. from the command line
     # Use the first URI as the recursion base unless specified otherwise.
-    $Opts{Base_Location} = ($Opts{Base_Location} eq '.')
-      ? $response->{absolute_uri}->canonical() :
-        URI->new($Opts{Base_Location})->canonical();
+    push(@{$Opts{Base_Locations}}, $response->{absolute_uri}->canonical())
+      unless @{$Opts{Base_Locations}};
   } else {
     # Before fetching the document, we don't know if we'll be within the
     # recursion scope or not (think redirects).
@@ -650,7 +672,7 @@ sub check_uri ($$$;$)
   $doc_count++;
 
   if ($Opts{HTML}) {
-    &html_header($uri, 0, $cookie) if $first;
+    &html_header($uri, 0, $cookie) if $is_first;
     print('<h2>');
   }
 
@@ -658,8 +680,21 @@ sub check_uri ($$$;$)
 
   my $result_anchor = 'results'.$doc_count;
 
+  if ($is_first && !$Opts{HTML} && !$Opts{Summary_Only}) {
+    my $s = $Opts{Sleep_Time} == 1 ? '' : 's';
+    my $acclang = $Opts{Accept_Language} || '(not sent)';
+    printf(<<'EOF', $Accept, $acclang, $Opts{Sleep_Time}, $s);
+
+Settings used:
+- Accept: %s
+- Accept-Language: %s
+- Sleeping %d second%s between requests to each server
+EOF
+  }
+
   printf("\nProcessing\t%s\n\n",
-         $Opts{HTML} ? &show_url($absolute_uri) : $absolute_uri);
+         $Opts{HTML} ? &show_url($absolute_uri) : $absolute_uri)
+    unless $Opts{Quiet};
 
   if ($Opts{HTML}) {
     print("</h2>\n");
@@ -668,7 +703,7 @@ sub check_uri ($$$;$)
       my $acclang = &encode($Opts{Accept_Language} || '(not sent)');
       my $s = $Opts{Sleep_Time} == 1 ? '' : 's';
       printf(<<'EOF', $accept, $acclang, $Opts{Sleep_Time}, $s);
-<div id="settings">
+<div class="settings">
 Settings used:
  <ul>
   <li><tt><a href="http://www.w3.org/Protocols/rfc2616/rfc2616-sec14.html#sec14.1">Accept</a></tt>: %s</li>
@@ -689,23 +724,13 @@ EOF
              &encode($Opts{_Self_URI}));
       print("<pre>\n");
     }
-  } elsif (! $Opts{Summary_Only}) {
-    my $s = $Opts{Sleep_Time} == 1 ? '' : 's';
-    my $acclang = $Opts{Accept_Language} || '(not sent)';
-    printf(<<'EOF', $Accept, $acclang, $Opts{Sleep_Time}, $s);
-Settings used:
-- Accept: %s
-- Accept-Language: %s
-- Sleeping %d second%s between requests to each server
-
-EOF
   }
 
-  if ($Opts{Summary_Only}) {
-    if ($Opts{HTML}) { print '<p>'}
+  if ($Opts{Summary_Only} && !$Opts{Quiet}) {
+    print '<p>' if $Opts{HTML};
     print 'This may take some time';
-    if ($Opts{HTML}) { print '... (<a href="'.$Cfg{Doc_URI}.'#wait">why?</a>)</p>'}
-    else { print " if the document has many links to check.\n"}
+    print "... (<a href=\"$Cfg{Doc_URI}#wait\">why?</a>)</p>" if $Opts{HTML};
+    print " if the document has many links to check.\n" unless $Opts{HTML};
   }
   # Record that we have processed this resource
   $processed{$absolute_uri} = 1;
@@ -775,6 +800,7 @@ EOF
   foreach my $u (keys %links) {
 
     # Don't check mailto: URI's
+    # TODO: bug 29
     next if ($u =~ m/^mailto:/);
 
     if ($Opts{Summary_Only}) {
@@ -799,7 +825,7 @@ EOF
       # List the broken fragments
       foreach my $fragment (keys %{$links{$u}{fragments}}) {
         if ($Opts{Verbose}) {
-          my @frags = sort keys %{$links{$u}{fragments}{$fragment}};
+          my @frags = sort {$a<=>$b} keys %{$links{$u}{fragments}{$fragment}};
           &hprintf("\t\t%s %s - Line%s: %s\n",
                    $fragment,
                    ($results{$u}{fragments}{$fragment}) ? 'OK' : 'Not found',
@@ -957,14 +983,19 @@ sub in_recursion_scope ($)
   my ($uri) = @_;
   return undef unless $uri;
 
-  my $current = URI->new($uri)->canonical();
-  my $rel = $current->rel($Opts{Base_Location}); # base -> current!
+  my $candidate = URI->new($uri)->canonical();
 
-  return undef if ($current eq $rel);     # Relative path not possible?
-  return undef if ($rel =~ m|^(\.\.)?/|); # Relative path starts with ../ or /?
-  return undef if (defined($Opts{Exclude_Docs}) &&
-                   $current =~ $Opts{Exclude_Docs});
-  return 1;
+  return undef
+    if (defined($Opts{Exclude_Docs}) && $candidate =~ $Opts{Exclude_Docs});
+
+  foreach my $base (@{$Opts{Base_Locations}}) {
+    my $rel = $candidate->rel($base);
+    next if ($candidate eq $rel);   # Relative path not possible?
+    next if ($rel =~ m|^(\.\.)?/|); # Relative path upwards?
+    return 1;
+  }
+
+  return undef; # We always have at least one base location.
 }
 
 ##################################################
@@ -1189,19 +1220,18 @@ sub parse_document ($$$$$)
 sub new
 {
   my $p = HTML::Parser::new(@_, api_version => 3);
+  eval { local $SIG{__DIE__}; $p->utf8_mode(1); };
 
   # Start tags
-  $p->handler(start => 'start', 'self, tagname, attr, text, event, tokens');
+  $p->handler(start => 'start', 'self, tagname, attr, text, line');
   # Declarations
   $p->handler(declaration =>
               sub {
                 my $self = shift;
                 $self->declaration(substr($_[0], 2, -1));
-              }, 'self, text');
+              }, 'self, text, line');
   # Other stuff
-  $p->handler(default => 'text', 'self, text');
-  # Line count
-  $p->{Line} = 1;
+  $p->handler(default => 'parse_progress', 'self, line') if $Opts{Progress};
   # Check <a [..] name="...">?
   $p->{check_name} = 1;
   # Check <[..] id="..">?
@@ -1237,16 +1267,15 @@ sub doctype
   $self->xml_mode(1) if (m%^-//W3C//DTD XHTML %);
 }
 
-#######################################
-# Count the number of lines in a file #
-#######################################
+###################################
+# Print parse progress indication #
+###################################
 
-sub new_line
+sub parse_progress
 {
-  my ($self, $string) = @_;
-  my $count = ($string =~ tr/\n//);
-  $self->{Line} = $self->{Line} + $count;
-  printf("\r%4d%%", int($self->{Line}/$self->{Total}*100)) if $Opts{Progress};
+  my ($self, $line) = @_;
+  printf("\r%4d%%", int($line/$self->{Total}*100))
+    if (defined($line) && $line >= 0);
 }
 
 #############################
@@ -1275,17 +1304,18 @@ sub get_anchor
 
 sub add_link
 {
-  my ($self, $uri) = @_;
-  $self->{Links}{$uri}{$self->{Line}}++ if defined($uri);
+  my ($self, $uri, $line) = @_;
+  $self->{Links}{$uri}{$line}++ if defined($uri);
 }
 
 sub start
 {
-  my ($self, $tag, $attr, $text) = @_;
+  my ($self, $tag, $attr, $text, $line) = @_;
+  $line = LINE_UNKNOWN() unless defined($line);
 
   # Anchors
   my $anchor = $self->get_anchor($tag, $attr);
-  $self->{Anchors}{$anchor}{$self->{Line}}++ if defined($anchor);
+  $self->{Anchors}{$anchor}{$line}++ if defined($anchor);
 
   # Links
   if (!$self->{only_anchors}) {
@@ -1297,42 +1327,32 @@ sub start
         $self->{base} = $attr->{href};
       }
     } else {
-      $self->add_link($attr->{href});
+      $self->add_link($attr->{href}, $line);
     }
-    $self->add_link($attr->{src});
-    $self->add_link($attr->{data}) if ($tag eq 'object');
-    $self->add_link($attr->{cite}) if ($tag eq 'blockquote');
+    $self->add_link($attr->{src}, $line);
+    $self->add_link($attr->{data}, $line) if ($tag eq 'object');
+    $self->add_link($attr->{cite}, $line) if ($tag eq 'blockquote');
   }
 
-  # Line counting
-  $self->new_line($text) if ($text =~ m/\n/);
-}
-
-sub text
-{
-  my ($self, $text) = @_;
-  if (!$Opts{Progress}) {
-    # If we are just extracting information about anchors,
-    # parsing this part is only cosmetic (progress indicator)
-    return unless !$self->{only_anchors};
-  }
-  $self->new_line($text) if ($text =~ /\n/);
+  $self->parse_progress($line) if $Opts{Progress};
 }
 
 sub declaration
 {
-  my ($self, $text) = @_;
+  my ($self, $text, $line) = @_;
+  $line = LINE_UNKNOWN() unless defined($line);
+
   # Extract the doctype
   my @declaration = split(/\s+/, $text, 4);
   if (($#declaration >= 3) &&
       ($declaration[0] eq 'DOCTYPE') &&
       (lc($declaration[1]) eq 'html')) {
     # Parse the doctype declaration
-    $text =~ m/^DOCTYPE\s+html\s+PUBLIC\s+\"([^\"]*)\"(\s+\"([^\"]*)\")?\s*$/i;
+    $text =~ m/^DOCTYPE\s+html\s+(?:PUBLIC\s+"([^"]+)"|SYSTEM)(\s+"([^"]+)")?\s*$/i;
     # Store the doctype
     $self->doctype($1) if $1;
     # If there is a link to the DTD, record it
-    $self->{Links}{$3}{$self->{Line}}++ if (!$self->{only_anchors} && $3);
+    $self->{Links}{$3}{$line}++ if (!$self->{only_anchors} && $3);
   }
   return unless !$self->{only_anchors};
   $self->text($text);
@@ -1352,6 +1372,7 @@ sub check_validity ($$$\%\%)
   # $redirects is a map of the redirects encountered
 
   # Checking file: URI's is not allowed with a CGI
+  # TODO: bug 29
   if ($testing ne $uri) {
     if (!$Opts{Command_Line} && $testing !~ m/^file:/ && $uri =~ m/^file:/) {
       my $msg = 'Error: \'file:\' URI not allowed';
@@ -1543,6 +1564,20 @@ sub sort_unique (@)
 # Print the results #
 #####################
 
+sub line_number ($)
+{
+  my $line = shift;
+  return $line if ($line >= 0);
+  return "(N/A)";
+}
+
+sub http_rc ($)
+{
+  my $rc = shift;
+  return $rc if ($rc >= 0);
+  return "(N/A)";
+}
+
 sub anchors_summary (\%\%)
 {
   my ($anchors, $errors) = @_;
@@ -1584,7 +1619,8 @@ EOF
 
   foreach my $anchor (@errors) {
     my $format;
-    my @unique = &sort_unique(keys %{$anchors->{$anchor}});
+    my @unique = &sort_unique(map { line_number($_) }
+                              keys %{$anchors->{$anchor}});
     if ($Opts{HTML}) {
       $format = "<tr class=\"broken\"><td>%s</td><td>%s</td></tr>\n";
     } else {
@@ -1618,7 +1654,7 @@ sub show_link_report (\%\%\%\%\@;$\%)
       push (@total_lines, $l);
     }
     foreach my $f (keys %{$links->{$u}{fragments}}) {
-      next if ($f eq $u && defined($links->{$u}{$u}{-1}));
+      next if ($f eq $u && defined($links->{$u}{$u}{LINE_UNKNOWN()}));
       foreach my $l (keys %{$links->{$u}{fragments}{$f}}) {
         push (@total_lines, $l);
       }
@@ -1668,14 +1704,14 @@ on how to solve this</a>.';
       $whattodo = 'Add a trailing slash to the URL.';
     }
 
-    my @unique = &sort_unique(@total_lines);
+    my @unique = &sort_unique(map { line_number($_) } @total_lines);
     my $lines_list = join(', ', @unique);
     my $s = (scalar(@unique) > 1) ? 's' : '';
     undef @unique;
 
     my @http_codes = ($currloc->{code});
     unshift(@http_codes, $currloc->{orig}) if $currloc->{orig};
-    @http_codes = map { $_ < 0 ? '(N/A)' : $_ } @http_codes;
+    @http_codes = map { http_rc($_) } @http_codes;
 
     if ($Opts{HTML}) {
       # Style stuff
@@ -1949,7 +1985,7 @@ EOF
       foreach my $code (sort(keys(%code_summary))) {
         printf('<tr%s>', &bgcolor($code));
         printf('<td><a href="#d%scode_%s">%s</a></td>',
-               $doc_count, $code, $code < 0 ? '(N/A)' : $code);
+               $doc_count, $code, http_rc($code));
         printf('<td>%s</td>', $code_summary{$code});
         printf('<td>%s</td>', $todo{$code});
         print "</tr>\n";

@@ -6,25 +6,13 @@
     <title>W3C Link Checker Documentation</title>
     <link rev="made" href="mailto:www-validator@w3.org" />
     <style type="text/css" media="all">@import "linkchecker.css";</style>
-    <meta name="revision" content="$Id: checklink.html,v 1.35 2006/09/21 15:49:57 ville Exp $" />
+    <meta name="revision" content="$Id: checklink.html,v 1.50 2009/02/10 18:47:39 ville Exp $" />
   </head>
 
   <body>
-    <div id="banner">
-    <h1 id="title"><a href="http://www.w3.org/"><img height="48" width="72"
-        alt="W3C" id="logo" src="w3c_home.png" /></a>
-	<a href="http://www.w3.org/QA/"><img src="qa-small.png" height="48" width="72" alt="QA" /></a>
-      Link Checker</h1>
-    </div>
-
-    <ul class="navbar" id="menu">
-        <li><span class="hideme"><a href="#main" accesskey="2" title="Skip past navigation to main part of page">Skip Navigation</a> |</span>
-            <a href="http://validator.w3.org/checklink" accesskey="1" title="The Link Checker Service at W3C">Link Checker</a></li>
-        <li><a href="http://search.cpan.org/dist/W3C-LinkChecker/" title="Download the source / Install this service">Download</a></li>
-	<li><a href="#csb" title="feedback: comments, suggestions and bugs" accesskey="4">Feedback</a></li>
-        <li><a href="http://validator.w3.org" title="Validate your markup with the W3C Markup Validation Service">Validator</a></li>
-    </ul>
-
+	<div id="banner"><h1 id="title"><a href="http://www.w3.org/" title="W3C"><img alt="W3C" id="logo" src="../images/w3c.png" /></a>
+	<a href="checklink"><span>Link Checker</span></a></h1>
+	<p id="tagline">Check links and anchors in Web pages or full Web sites</p></div>
     <div id="main">
     <ul>
       <li><a href="#about">About this service</a></li>
@@ -119,16 +107,7 @@
     </p>
     <ol>
       <li>Home: access key "1" leads back to the service's home page.</li>
-      <li>Skip Navigation: access key "2"...
-        <ul>
-          <li>... in results pages, leads you to the beginning of the actual
-            results.</li>
-          <li>... in documentation pages, leads you to the table of
-            contents.</li>
-          <li>... in other pages (home page, advanced interface pages),
-            leads you to the first form.</li>
-        </ul>
-      </li>
+      <li>Downloads: access key "2" leads to downloads.</li>
       <li>Documentation: access key "3" leads to the documentation index for
          the service.</li>
       <li>Feedback: access key "4" leads to the feedback instructions.</li>
@@ -141,12 +120,19 @@
       <a href="http://www.cpan.org/">CPAN</a> distribution, and depends on
       a few other modules which are also available from CPAN.
     </p>
+    <h3 id="install-CPAN">Install with the CPAN utility</h3>
+    
+    <p>If you system has a working installation of Perl, you should be able to install the link checker and its dependencies with a single line from the commandline shell:</p>
+    <p><kbd>sudo perl -MCPAN -e 'install W3C::LinkChecker'</kbd> (use without the <kbd>sudo</kbd> command if installing from an administrator account).</p>
+    <p>If this is the first time you use the CPAN utility, you may have to answer a few setup questions before the tool downloads, builds and installs the link checker.</p>
+    
+    <h3 id="install-manual">Install by hand</h3>
 
-    <p>In order to install it:</p>
+    <p>If for any reason the technique described above is not working or if you prefer installing each package by hand, follow the instructions below:</p>
 
     <ol>
       <li>
-	Install <a href="http://www.perl.com/">Perl</a>.
+	Install <a href="http://www.perl.org/get.html">Perl</a>.
       </li>
       <li>
 	You will need the following <a href="http://www.cpan.org/">CPAN</a>
@@ -163,11 +149,11 @@
 	  <li><a href="http://search.cpan.org/dist/CGI.pm/">CGI.pm</a> (required for CGI mode only)</li>
           <li><a href="http://search.cpan.org/dist/Config-General/">Config-General</a> (optional, version 2.06 or newer; required only for reading the (optional) configuration file)</li>
 	  <li><a href="http://search.cpan.org/dist/HTML-Parser/">HTML-Parser</a> (version 3.20 or newer)</li>
-	  <li><a href="http://search.cpan.org/dist/libwww-perl/">libwww-perl</a> (version 5.66 or newer; version 5.70 or newer recommended, except for 5.76 which has a bug that may cause the link checker follow redirects to <code>file:</code> URLs)</li>
+	  <li><a href="http://search.cpan.org/dist/libwww-perl/">libwww-perl</a> (version 5.802 or newer)</li>
           <li><a href="http://search.cpan.org/dist/Net-IP/">Net-IP</a> (optional but recommended; required for restricting access to <a href="http://www.ietf.org/rfc/rfc1918.txt">private IP addresses</a>)</li>
           <li><a href="http://search.cpan.org/dist/TermReadKey/">TermReadKey</a> (optional but recommended; required only in command line mode for password input)</li>
 	  <li><a href="http://search.cpan.org/dist/Time-HiRes/">Time-HiRes</a></li>
-	  <li><a href="http://search.cpan.org/dist/URI/">URI</a></li>
+	  <li><a href="http://search.cpan.org/dist/URI/">URI</a> (version 1.31 or newer)</li>
 	</ul>
       </li>
       <li>
@@ -215,8 +201,9 @@
     <p>
       The link checker honors proxy settings from the
       <code><em>scheme</em>_proxy</code> environment variables.  See
-      <a href="http://search.cpan.org/dist/libwww-perl/lib/LWP.pm#ENVIRONMENT">LWP(3)</a>
-      for more information.
+      <a href="http://search.cpan.org/dist/libwww-perl/lib/LWP.pm#ENVIRONMENT">LWP(3)</a> and
+      <a href="http://search.cpan.org/dist/libwww-perl/lib/LWP/UserAgent.pm#%24ua-%3Eenv_proxy">LWP::UserAgent(3)'s
+        <code>env_proxy</code></a> method for more information.
     </p>
 
     <p>
@@ -284,8 +271,17 @@ Disallow:
       Please send comments, suggestions and bug reports about the link checker
       to the <a href="mailto:www-validator@w3.org?subject=checklink%3A%20">www-validator mailing list</a>
       (<a href="http://lists.w3.org/Archives/Public/www-validator/">archives</a>),
-      with 'checklink' in the subject.
+      with 'checklink' in the subject. See examples below
     </p>
+
+	<dl>
+		<dt>Good</dt>
+		<dd>Subject: online checklink times out when accessed with Iceweasel 2.1.12</dd>
+		<dt>Bad</dt>
+		<dd>Subject: checklink</dd>
+		<dt>Bad</dt>
+		<dd>Subject: checklink does not work</dd>
+	</dl>
 
     <h3><a name="issues" id="issues">Known issues</a></h3>
 
@@ -299,16 +295,24 @@ Disallow:
     </p>
 
     </div>
+
+    <ul class="navbar" id="menu">
+        <li><a href="http://validator.w3.org/checklink" accesskey="1" title="The Link Checker Service at W3C">Link Checker</a></li>
+        <li><a href="http://search.cpan.org/dist/W3C-LinkChecker/" accesskey="2" title="Download the source / Install this service">Download</a></li>
+	<li><a href="#csb" title="feedback: comments, suggestions and bugs" accesskey="4">Feedback</a></li>
+        <li><a href="http://validator.w3.org" title="Validate your markup with the W3C Markup Validation Service">Validator</a></li>
+    </ul>
+
     <address>
       <a href="http://validator.w3.org/check?uri=referer"><img
-        src="valid-xhtml10.png" height="31" width="88"
-        alt="Valid XHTML 1.0!" /></a>
+        src="../images/valid_icons/valid-xhtml10-blue.png" height="31" width="88"
+        alt="Valid XHTML Strict" /></a>
       <a title="Send Feedback for the W3C Link Checker"
         href="http://validator.w3.org/feedback.html">The W3C Validator Team</a><br />
-      $Date: 2006/09/21 15:49:57 $
+      $Date: 2009/02/10 18:47:39 $
     </address>
     <p class="copyright">
-      <a rel="Copyright" href="http://www.w3.org/Consortium/Legal/ipr-notice#Copyright">Copyright</a> &copy; 1994-2006
+      <a rel="Copyright" href="http://www.w3.org/Consortium/Legal/ipr-notice#Copyright">Copyright</a> &copy; 1994-2009
       <a href="http://www.w3.org/"><acronym title="World Wide Web Consortium">W3C</acronym></a>&reg;
       (<a href="http://www.lcs.mit.edu/"><acronym title="Massachusetts Institute of Technology">MIT</acronym></a>,
       <a href="http://www.ercim.org/"><acronym title="European Research Consortium for Informatics and Mathematics">ERCIM</acronym></a>,

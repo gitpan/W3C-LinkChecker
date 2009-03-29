@@ -5,7 +5,7 @@
 # (c) 1999-2009 World Wide Web Consortium
 # based on Renaud Bruyeron's checklink.pl
 #
-# $Id: checklink,v 4.147 2009/02/10 20:56:26 ville Exp $
+# $Id: checklink,v 4.154 2009/03/28 13:50:42 ville Exp $
 #
 # This program is licensed under the W3C(r) Software License:
 #       http://www.w3.org/Consortium/Legal/copyright-software
@@ -28,6 +28,15 @@ use strict;
 # Get rid of potentially unsafe and unneeded environment variables.
 delete(@ENV{qw(IFS CDPATH ENV BASH_ENV)});
 $ENV{PATH} = ''; # undef would output warnings with Perl 5.6.1's Cwd.pm.
+
+# ...but we want PERL5LIB honored even in taint mode, see perlsec, perl5lib,
+# http://www.mail-archive.com/cpan-testers-discuss%40perl.org/msg01064.html
+BEGIN {
+  # undefinedness and "v-string in use/require non-portable" warnings with
+  # perl5lib 1.02 and perl 5.10.0, rt.cpan.org #43446, #43447
+  local $^W = 0;
+  require perl5lib;
+}
 
 # -----------------------------------------------------------------------------
 
@@ -203,7 +212,6 @@ use HTTP::Response  1.50 qw(); # >= 1.50 for decoded_content()
 use Time::HiRes          qw();
 use URI             1.31 qw(); # >= 1.31 for sip: abs/rel
 use URI::Escape          qw();
-use URI::file            qw();
 # @@@ Needs also W3C::UserAgent but can't use() it here.
 
 use constant RC_ROBOTS_TXT          => -1;
@@ -267,9 +275,9 @@ BEGIN
   # Version info
   $PACKAGE     = 'W3C Link Checker';
   $PROGRAM     = 'W3C-checklink';
-  $VERSION     = '4.4';
+  $VERSION     = '4.5';
   $REVISION    = sprintf('version %s (c) 1999-2009 W3C', $VERSION);
-  my ($cvsver) = q$Revision: 4.147 $ =~ /(\d+[\d\.]*\.\d+)/;
+  my ($cvsver) = q$Revision: 4.154 $ =~ /(\d+[\d\.]*\.\d+)/;
   $AGENT       = sprintf('%s/%s [%s] %s',
                          $PROGRAM, $VERSION, $cvsver,
                          (W3C::UserAgent::USE_ROBOT_UA
@@ -373,7 +381,7 @@ my %Opts =
     Verbose           => 0,
     Progress          => 0,
     HTML              => 0,
-    Timeout           => 60,
+    Timeout           => 30,
     Redirects         => 1,
     Dir_Redirects     => 1,
     Accept_Language   => $cmdline ? undef : $ENV{HTTP_ACCEPT_LANGUAGE},
@@ -449,6 +457,8 @@ if ($Opts{Command_Line}) {
 
   require Text::Wrap;
   Text::Wrap->import('wrap');
+
+  require URI::file;
 
   &usage(1) unless scalar(@ARGV);
 
@@ -730,7 +740,7 @@ Options:
                             document checked.
  -S, --sleep SECS           Sleep SECS seconds between requests to each server
                             (default and minimum: 1 second).
- -t, --timeout SECS         Timeout for requests (in seconds).
+ -t, --timeout SECS         Timeout for requests in seconds (default: 30).
  -d, --domain DOMAIN        Regular expression describing the domain to which
                             authentication information will be sent
                             (default: $trust).
@@ -1052,7 +1062,7 @@ EOF
           $broken{$u}{fragments}{$fragment} += 2;
         }
       }
-    } else {
+    } elsif (!($Opts{Quiet} && &informational($results{$u}{location}{code}))) {
       # Couldn't find the document
       $broken{$u}{location} = 1;
       # All the fragments associated are hence broken
@@ -1901,6 +1911,14 @@ sub http_rc ($)
   return "(N/A)";
 }
 
+# returns true if the given code is informational
+sub informational ($)
+{
+  my $rc = shift;
+  return $rc == RC_ROBOTS_TXT() || $rc == RC_IP_DISALLOWED() ||
+    $rc == RC_PROTOCOL_DISALLOWED();
+}
+
 sub anchors_summary (\%\%)
 {
   my ($anchors, $errors) = @_;
@@ -2373,7 +2391,7 @@ sub banner ($)
 {
   my $tagline ="Check links and anchors in Web pages or full Web sites";
 
-  printf(<<'EOF', URI->new_abs("../images/w3c.png", $Cfg{Doc_URI}), $tagline);
+  printf(<<'EOF', URI->new_abs("../images/no_w3c.png", $Cfg{Doc_URI}), $tagline);
 <div id="banner"><h1 id="title"><a href="http://www.w3.org/" title="W3C"><img alt="W3C" id="logo" src="%s" /></a>
 <a href="checklink"><span>Link Checker</span></a></h1>
 <p id="tagline">%s</p></div>
@@ -2389,8 +2407,7 @@ sub status_icon($)
   my $r = HTTP::Response->new($code);
   if ($r->is_success()) {
     $icon_type = 'error'; # if is success but reported, it's because of broken frags => error
-  } elsif ($code == RC_ROBOTS_TXT() || $code == RC_IP_DISALLOWED() ||
-           $code == RC_PROTOCOL_DISALLOWED()) {
+  } elsif (&informational($code)) {
     $icon_type = 'info';
   } elsif ($code == 300) {
     $icon_type = 'info';

@@ -1,4 +1,6 @@
-$Id: checklink.pod,v 1.22 2009/03/04 17:23:58 ville Exp $
+$Id: checklink.pod,v 1.32 2010/04/22 19:46:51 ville Exp $
+
+=encoding utf8
 
 =head1 NAME
 
@@ -79,6 +81,35 @@ regular expression would.
 In recursive mode, do not check links in documents whose full, canonical
 URIs match I<regexp>.  This option may be specified multiple times.
 
+=item B<--suppress-redirect> I<URI-E<gt>URI>
+
+Do not report a redirect from the first to the second URI.  The "-E<gt>" is
+literal text.  This option may be specified multiple times.  Whitespace may
+be used instead of "-E<gt>" to separate the URIs.
+
+=item B<--suppress-redirect-prefix> I<URI-E<gt>URI>
+
+Do not report a redirect from a child of the first URI to the same child of
+the second URI.  The \"->\" is literal text.  This option may be specified
+multiple times.  Whitespace may be used instead of "-E<gt>" to separate the
+URIs.
+
+=item B<--suppress-temp-redirects>
+
+Do not report warnings about temporary redirects.
+
+=item B<--suppress-broken> I<CODE:URI>
+
+Do not report a broken link with the given CODE.  CODE is the HTTP
+response, or -1 for robots exclusion.  The ":" is literal text.  This
+option may be specified multiple times.  Whitespace may be used instead of
+":" to separate the CODE and the URI.
+
+=item B<--suppress-fragment> I<URI>
+
+Do not report the given broken fragment URI.  A fragment URI contains "#".
+This option may be specified multiple times.
+
 =item B<-L, --languages> I<accept-language>
 
 The C<Accept-Language> HTTP header to send.  In command line mode,
@@ -86,6 +117,12 @@ this header is not sent by default.  The special value C<auto> causes
 a value to be detected from the C<LANG> environment variable, and sent
 if found.  In CGI mode, the default is to send the value received from
 the client as is.
+
+=item B<-c, --cookies> I<cookie-file>
+
+Use cookies, load/save them in I<cookie-file>.  The special value
+C<tmp> causes non-persistent use of cookies, i.e. they are used but
+only stored in memory for the duration of this link checker run.
 
 =item B<-R, --no-referer>
 
@@ -132,17 +169,23 @@ information (if present) will be sent.  The default value can be specified
 in the configuration file.  See the C<Trusted> entry in the configuration
 file description below for more information.
 
-=item B<--masquerade> I<"local remote">
+=item B<--masquerade> I<"real-prefix surrogate-prefix">
 
-Masquerade local dir as a remote URI.  For example, the following results in
-/my/local/dir/ being "mapped" to http://some/remote/uri/
+Perform a simple string substitution: URIs which begin with the
+string C<real-prefix> are rewritten using the C<surrogate-prefix>
+before being dereferenced.  Useful for making a local
+directory masquerade as a remote one. For example:
 
-  --masquerade "/my/local/dir http://some/remote/uri/"
+  --masquerade "http://example.com/x/y/z/ file:///my/local/dir/"
 
-As of revision 3.6.2.19 of checklink, B<--masquerade> takes a single
-argument consisting of two URIs, separated by whitespace.  The quote
-marks are not part of the argument, but one usual way of
-providing a value with embedded whitespace is to enclose it in quotes.
+If the document being checked contains a link to
+http://example.com/x/y/z/foo.html, then the local file system will be
+checked for file:///my/local/dir/foo.html.
+
+B<--masquerade> takes a single argument consisting of two URIs,
+separated by whitespace.  The quote marks are not part of the
+argument, but one usual way of providing a value with embedded
+whitespace is to enclose it in quotes.
 
 =item B<-H, --html>
 
@@ -175,6 +218,13 @@ mode and false when run as a CGI script.  For example, to disallow checking
 non-public IP addresses, regardless of the mode, use:
 
    Allow_Private_IPs = 0
+
+C<Forbidden_Protocols> is a comma separated list of additional protocols/URI
+schemes that the link checker is not allowed to use.  The C<javascript> and
+C<mailto> schemes are always forbidden, and so is the C<file> scheme when
+running as a CGI script.
+
+   Forbidden_Protocols = javascript,mailto
 
 C<Markup_Validator_URI> and C<CSS_Validator_URI> are formatted URIs to the
 respective validators.  The C<%s> in these will be replaced with the full
@@ -224,8 +274,9 @@ and many other volunteers since.  Use the E<lt>www-validator@w3.orgE<gt>
 mailing list for feedback, and see
 L<http://validator.w3.org/docs/checklink.html#csb> for more information.
 
-This manual page was written by Frédéric Schütz <schutz@mathgen.ch>
-for the Debian GNU/Linux system (but may be used by others).
+This manual page was originally written by Frédéric Schütz
+E<lt>schutz@mathgen.chE<gt> for the Debian GNU/Linux system (but may
+be used by others).
 
 =head1 COPYRIGHT
 

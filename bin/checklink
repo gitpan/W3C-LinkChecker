@@ -2,10 +2,8 @@
 #
 # W3C Link Checker
 # by Hugo Haas <hugo@w3.org>
-# (c) 1999-2010 World Wide Web Consortium
+# (c) 1999-2011 World Wide Web Consortium
 # based on Renaud Bruyeron's checklink.pl
-#
-# $Id: checklink,v 4.194 2010/04/22 19:55:15 ville Exp $
 #
 # This program is licensed under the W3C(r) Software License:
 #       http://www.w3.org/Consortium/Legal/copyright-software
@@ -13,8 +11,8 @@
 # The documentation is at:
 #       http://validator.w3.org/docs/checklink.html
 #
-# See the CVSweb interface at:
-#       http://dev.w3.org/cvsweb/perl/modules/W3C/LinkChecker/
+# See the Mercurial interface at:
+#       http://dvcs.w3.org/hg/link-checker/
 #
 # An online version is available at:
 #       http://validator.w3.org/checklink
@@ -44,6 +42,7 @@ package W3C::UserAgent;
 
 use LWP::RobotUA 1.19 qw();
 use LWP::UserAgent qw();
+use Net::HTTP::Methods 5.833 qw();    # >= 5.833 for 4kB cookies (#6678)
 
 # if 0, ignore robots exclusion (useful for testing)
 use constant USE_ROBOT_UA => 1;
@@ -53,14 +52,6 @@ if (USE_ROBOT_UA) {
 }
 else {
     @W3C::UserAgent::ISA = qw(LWP::UserAgent);
-}
-
-BEGIN {
-
-    # The 4k default line length in LWP <= 5.832 isn't enough for example to
-    # accommodate 4kB cookies (RFC 2985); bump it (#6678).
-    require LWP::Protocol::http;
-    push(@LWP::Protocol::http::EXTRA_SOCK_OPTS, MaxLineLength => 8 * 1024);
 }
 
 sub new
@@ -128,7 +119,7 @@ sub simple_request
     # RFC 2616, section 15.1.3
     $_[0]->remove_header("Referer")
         if ($_[0]->referer() &&
-        (secure_scheme($_[0]->referer()) && !secure_scheme($_[0]->uri())));
+        (!$_[0]->uri()->secure() && URI->new($_[0]->referer())->secure()));
 
     $response ||= do {
         local $SIG{__WARN__} =
@@ -206,13 +197,6 @@ sub ip_disallowed
     return $resp;
 }
 
-sub secure_scheme
-{
-    my $uri = shift or return 0;
-    $uri = URI->new($uri) unless ref($uri);
-    return ($uri->scheme() =~ /^(?:file|https|ldaps|sips|snews|ssh)$/i);
-}
-
 # -----------------------------------------------------------------------------
 
 package W3C::LinkChecker;
@@ -224,13 +208,15 @@ use CSS::DOM 0.09 qw();    # >= 0.09 for many bugfixes
 use CSS::DOM::Constants qw(:rule);
 use CSS::DOM::Style qw();
 use CSS::DOM::Util qw();
+use Encode qw();
 use HTML::Entities qw();
 use HTML::Parser 3.40 qw();    # >= 3.40 for utf8_mode()
 use HTTP::Headers::Util qw();
-use HTTP::Request qw();
+use HTTP::Message 5.827 qw();    # >= 5.827 for content_charset()
+use HTTP::Request 5.814 qw();    # >= 5.814 for accept_decodable()
 use HTTP::Response 1.50 qw();    # >= 1.50 for decoded_content()
 use Time::HiRes qw();
-use URI 1.31 qw();               # >= 1.31 for sip: abs/rel
+use URI 1.53 qw();               # >= 1.53 for secure()
 use URI::Escape qw();
 use URI::Heuristic qw();
 
@@ -247,14 +233,16 @@ use constant MP2 =>
     (exists($ENV{MOD_PERL_API_VERSION}) && $ENV{MOD_PERL_API_VERSION} >= 2);
 
 # Tag=>attribute mapping of things we treat as links.
-# Note: base/@href and meta/@http-equiv get special treatment, see start()
-# for details.
+# Note: meta/@http-equiv gets special treatment, see start() for details.
 use constant LINK_ATTRS => {
-    a          => ['href'],
+    a => ['href'],
+
+    # base/@href intentionally not checked
     area       => ['href'],
     audio      => ['src'],
     blockquote => ['cite'],
     body       => ['background'],
+    command    => ['icon'],
 
     # button/@formaction not checked (side effects)
     del => ['cite'],
@@ -264,18 +252,20 @@ use constant LINK_ATTRS => {
 
     # form/@action not checked (side effects)
     frame  => ['longdesc', 'src'],
+    html   => ['manifest'],
     iframe => ['longdesc', 'src'],
     img    => ['longdesc', 'src'],
-    ins    => ['cite'],
 
     # input/@action, input/@formaction not checked (side effects)
     input  => ['src'],
+    ins    => ['cite'],
     link   => ['href'],
     object => ['data'],
     q      => ['cite'],
     script => ['src'],
     source => ['src'],
-    video  => ['src'],
+    track  => ['src'],
+    video  => ['src', 'poster'],
 };
 
 # Tag=>attribute mapping of things we treat as space separated lists of links.
@@ -303,12 +293,11 @@ BEGIN {
     # Version info
     $PACKAGE  = 'W3C Link Checker';
     $PROGRAM  = 'W3C-checklink';
-    $VERSION  = '4.6';
-    $REVISION = sprintf('version %s (c) 1999-2010 W3C', $VERSION);
-    my ($cvsver) = q$Revision: 4.194 $ =~ /(\d+[\d\.]*\.\d+)/;
-    $AGENT = sprintf(
-        '%s/%s [%s] %s',
-        $PROGRAM, $VERSION, $cvsver,
+    $VERSION  = '4.7';
+    $REVISION = sprintf('version %s (c) 1999-2011 W3C', $VERSION);
+    $AGENT    = sprintf(
+        '%s/%s %s',
+        $PROGRAM, $VERSION,
         (   W3C::UserAgent::USE_ROBOT_UA ? LWP::RobotUA->_agent() :
                 LWP::UserAgent->_agent()
         )
@@ -580,6 +569,11 @@ else {
 
     my $query = CGI->new();
 
+    for my $param ($query->param()) {
+        my @values = map { Encode::decode_utf8($_) } $query->param($param);
+        $query->param($param, @values);
+    }
+
     # Set a few parameters in CGI mode
     $Opts{Verbose}   = 0;
     $Opts{Progress}  = 0;
@@ -687,7 +681,8 @@ else {
             }
         }
     }
-    $uri = $uri->canonical()->as_string();
+    $uri = $uri->canonical();
+    $query->param("uri", $uri);
 
     &check_uri(scalar($query->Vars()), $uri, 1, $Opts{Depth}, $cookie);
     undef $query;    # Not needed any more.
@@ -702,6 +697,8 @@ else {
 
 sub parse_arguments ()
 {
+    require Encode::Locale;
+    Encode::Locale::decode_argv();
 
     require Getopt::Long;
     Getopt::Long->require_version(2.17);
@@ -1034,14 +1031,14 @@ sub urize ($)
             $uri = URI::file->new_abs($uri) unless $uri->scheme();
         }
     }
-    return $uri->canonical()->as_string();
+    return $uri->canonical();
 }
 
 ########################################
 # Check for broken links in a resource #
 ########################################
 
-sub check_uri (\%$$$$;$$)
+sub check_uri (\%\$$$$;\$$)
 {
     my ($params, $uri, $check_num, $depth, $cookie, $referer, $is_start) = @_;
     $is_start ||= ($check_num == 1);
@@ -1092,14 +1089,13 @@ sub check_uri (\%$$$$;$$)
         }
     }
 
-    my $absolute_uri = $response->{absolute_uri}->as_string();
-
     if ($Opts{HTML}) {
         $doc_header .=
-            ("<h2>\nProcessing\t" . &show_url($absolute_uri) . "\n</h2>\n\n");
+            ("<h2>\nProcessing\t" . &show_url($response->{absolute_uri}) .
+                "\n</h2>\n\n");
     }
     else {
-        $doc_header .= "\nProcessing\t$absolute_uri\n\n";
+        $doc_header .= "\nProcessing\t$response->{absolute_uri}\n\n";
     }
 
     if (!$Opts{Quiet}) {
@@ -1162,8 +1158,8 @@ Settings used:
 EOF
             printf("<p>Go to <a href=\"#%s\">the results</a>.</p>\n",
                 $result_anchor);
-            my $esc_uri =
-                URI::Escape::uri_escape($absolute_uri, "^A-Za-z0-9.");
+            my $esc_uri = URI::Escape::uri_escape($response->{absolute_uri},
+                "^A-Za-z0-9.");
             print "<p>For reliable link checking results, check ";
 
             if (!$response->{IsCss}) {
@@ -1195,10 +1191,11 @@ EOF
     }
 
     # Record that we have processed this resource
-    $processed{$absolute_uri} = 1;
+    $processed{$response->{absolute_uri}} = 1;
 
     # Parse the document
-    my $p = &parse_document($uri, $absolute_uri, $response, 1, ($depth != 0));
+    my $p = &parse_document($uri, $response->{absolute_uri},
+        $response, 1, ($depth != 0));
     my $base = URI->new($p->{base});
 
     # Check anchors
@@ -1275,6 +1272,7 @@ EOF
     my %broken;
     my $link_num = 0;
     while (my ($u, $ulinks) = each(%links)) {
+        $u = URI->new($u);
 
         if ($Opts{Summary_Only}) {
 
@@ -1359,7 +1357,7 @@ EOF
     # Do we want to process other documents?
     if ($depth != 0) {
 
-        foreach my $u (keys %links) {
+        foreach my $u (map { URI->new($_) } keys %links) {
 
             next unless $results{$u}{location}{success};    # Broken link?
 
@@ -1428,10 +1426,7 @@ sub decode_content ($)
         $ct = defined($ct) ? "'$ct'" : 'undefined';
         my $request_uri = $response->request->url;
 
-        # content_charset() is available in LWP >= 5.827
-        my $cs =
-            $response->can('content_charset') ? $response->content_charset() :
-                                                undef;
+        my $cs = $response->content_charset();
         $cs = defined($cs) ? "'$cs'" : 'unknown';
         $error =
             "Error decoding document at <$request_uri>, Content-Type $ct, " .
@@ -1444,18 +1439,18 @@ sub decode_content ($)
 # Get and parse a resource to process #
 #######################################
 
-sub get_document ($$$;\%$$$$$)
+sub get_document ($\$$;\%\$$$$$)
 {
     my ($method, $uri,    $in_recursion, $redirects, $referer,
         $cookie, $params, $check_num,    $is_start
     ) = @_;
 
     # $method contains the HTTP method the use (GET or HEAD)
-    # $uri contains the identifier of the resource
+    # $uri object contains the identifier of the resource
     # $in_recursion is > 0 if we are in recursion mode (i.e. it is at least
     #                        the second resource checked)
     # $redirects is a pointer to the hash containing the map of the redirects
-    # $referer is the URI of the referring document
+    # $referer is the URI object of the referring document
     # $cookie, $params, $check_num, and $is_start are for printing HTTP headers
     #                  and the form if $in_recursion == 0 and not authenticating
 
@@ -1535,12 +1530,12 @@ sub get_document ($$$;\%$$$$$)
 # Check whether a URI is within the scope of recursion. #
 #########################################################
 
-sub in_recursion_scope ($)
+sub in_recursion_scope (\$)
 {
     my ($uri) = @_;
     return 0 unless $uri;
 
-    my $candidate = URI->new($uri)->canonical();
+    my $candidate = $uri->canonical();
 
     return 0 if (defined($Opts{Exclude}) && $candidate =~ $Opts{Exclude});
 
@@ -1574,7 +1569,7 @@ sub is_content_type ($$)
 # Check whether a URI has already been processed #
 ##################################################
 
-sub already_processed ($$)
+sub already_processed (\$\$)
 {
     my ($uri, $referer) = @_;
 
@@ -1602,7 +1597,7 @@ sub already_processed ($$)
 # Get the content of a URI #
 ############################
 
-sub get_uri ($$;$$\%$$$$)
+sub get_uri ($\$;\$$\%$$$$)
 {
 
     # Here we have a lot of extra parameters in order not to lose information
@@ -1612,8 +1607,8 @@ sub get_uri ($$;$$\%$$$$)
     ) = @_;
 
     # $method contains the method used
-    # $uri contains the target of the request
-    # $referer is the URI of the referring document
+    # $uri object contains the target of the request
+    # $referer is the URI object of the referring document
     # $start is a timestamp (not defined the first time the function is called)
     # $redirects is a map of redirects
     # $code is the first HTTP return code
@@ -1637,9 +1632,7 @@ sub get_uri ($$;$$\%$$$$)
     $request->header('Accept-Language' => $Opts{Accept_Language})
         if $Opts{Accept_Language};
     $request->header('Accept', $Accept);
-
-    # accept_decodable() was added in LWP 5.814
-    $request->accept_decodable() if $request->can('accept_decodable');
+    $request->accept_decodable();
 
     # Are we providing authentication info?
     if ($auth && $request->url()->host() =~ $Opts{Trusted}) {
@@ -1711,7 +1704,7 @@ sub get_uri ($$;$$\%$$$$)
 # Record the results of an HTTP request #
 #########################################
 
-sub record_results ($$$)
+sub record_results (\$$$)
 {
     my ($uri, $method, $response) = @_;
     $results{$uri}{response}       = $response;
@@ -1785,7 +1778,7 @@ sub record_results ($$$)
 # Parse a document #
 ####################
 
-sub parse_document ($$$$$)
+sub parse_document (\$\$$$$)
 {
     my ($uri, $base_uri, $response, $links, $rec_needs_links) = @_;
 
@@ -1985,6 +1978,7 @@ sub add_link
         # Remove repeated slashes after the . or .. in relative links, to avoid
         # duplicated checking or infinite recursion.
         $uri =~ s|^(\.\.?/)/+|$1|o;
+        $uri = Encode::decode_utf8($uri);
         $uri = URI->new_abs($uri, $base) if defined($base);
         $self->{Links}{$uri}{defined($line) ? $line : LINE_UNKNOWN()}++;
     }
@@ -2005,25 +1999,8 @@ sub start
 
         my $tag_local_base = undef;
 
-        # Special case: base/@href
-        # TODO: This should go away as soon as LWP::Protocol::collect() invokes
-        #       HTML::HeadParser (thus taking care of it in $response->base()
-        #       transparently) for application/xhtml+xml and
-        #       application/vnd.wap.xhtml+xml documents
-        #       --> it does in LWP >= 5.810
-        if ($tag eq 'base') {
-
-            # Treat <base> (without href) or <base href=""> as if it didn't exist.
-            if (defined($attr->{href}) && length($attr->{href})) {
-                $self->{base} = $attr->{href};
-            }
-
-            # Note: base/@href intentionally not treated as a dereferenceable link:
-            # http://www.w3.org/mid/200802091439.27764.ville.skytta%40iki.fi
-        }
-
         # Special case: meta[@http-equiv=Refresh]/@content
-        elsif ($tag eq 'meta') {
+        if ($tag eq 'meta') {
             if ($attr->{'http-equiv'} &&
                 lc($attr->{'http-equiv'}) eq 'refresh')
             {
@@ -2177,12 +2154,12 @@ sub end_document
 # Check the validity of a link #
 ################################
 
-sub check_validity ($$$\%\%)
+sub check_validity (\$\$$\%\%)
 {
     my ($referer, $uri, $want_links, $links, $redirects) = @_;
 
-    # $referer is the URI of the document checked
-    # $uri is the URI of the target that we are verifying
+    # $referer is the URI object of the document checked
+    # $uri is the URI object of the target that we are verifying
     # $want_links is true if we're interested in links in the target doc
     # $links is a hash of the links in the documents checked
     # $redirects is a map of the redirects encountered
@@ -2790,7 +2767,7 @@ sub links_summary (\%\%\%\%)
         RC_ROBOTS_TXT() => sprintf(
             'The link was not checked due to %srobots exclusion rules%s. Check the link manually, and see also the link checker %sdocumentation on robots exclusion%s.',
             $Opts{HTML} ? (
-                '<a href="http://www.robotstxt.org/wc/exclusion.html#robotstxt">',
+                '<a href="http://www.robotstxt.org/robotstxt.html">',
                 '</a>',
                 "<a href=\"$Cfg{Doc_URI}#bot\">",
                 '</a>'
@@ -3020,7 +2997,7 @@ sub banner ($)
 
     printf(
         <<'EOF', URI->new_abs("../images/no_w3c.png", $Cfg{Doc_URI}), $tagline);
-<div id="banner"><h1 id="title"><a href="http://www.w3.org/" title="W3C"><img alt="W3C" id="logo" src="%s" /></a>
+<div id="banner"><h1 id="title"><a href="http://www.w3.org/" title="W3C"><img alt="W3C" id="logo" src="%s" width="110" height="61" /></a>
 <a href="checklink"><span>Link Checker</span></a></h1>
 <p id="tagline">%s</p></div>
 <div id="main">
@@ -3089,17 +3066,10 @@ sub bgcolor ($)
     return (' class="' . $class . '"');
 }
 
-sub show_url ($;$)
+sub show_url ($)
 {
-    my ($url, $fragment) = @_;
-    if (defined($fragment)) {
-        my $u = URI->new($url);
-        $u->fragment($fragment);
-        $url = $u->as_string();
-    }
-    $url = &encode($url);
-    return sprintf('<a href="%s">%s</a>',
-        $url, defined($fragment) ? &encode($fragment) : $url);
+    my ($url) = @_;
+    return sprintf('<a href="%s">%s</a>', (&encode($url)) x 2);
 }
 
 sub html_footer ()
@@ -3191,7 +3161,7 @@ sub print_form (\%$$)
     }
 
     print "<form action=\"", $Opts{_Self_URI},
-        "\" method=\"get\" onsubmit=\"return uriOk($check_num)\">
+        "\" method=\"get\" onsubmit=\"return uriOk($check_num)\" accept-charset=\"UTF-8\">
 <p><label for=\"uri_$check_num\">Enter the address (<a href=\"http://www.w3.org/Addressing/\">URL</a>)
 of a document that you would like to check:</label></p>
 <p><input type=\"text\" size=\"50\" id=\"uri_$check_num\" name=\"uri\" value=\"",

@@ -1,6 +1,6 @@
 --- #YAML:1.0
 name:               W3C-LinkChecker
-version:            4.6
+version:            4.7
 abstract:           W3C Link Checker
 author:
     - W3C QA-dev Team <public-qa-dev@w3.org>
@@ -19,12 +19,15 @@ requires:
     CSS::DOM::Constants:  0
     CSS::DOM::Style:      0
     CSS::DOM::Util:       0
+    Encode:               0
+    Encode::Locale:       0
     File::Spec:           0
     Getopt::Long:         2.17
     HTML::Entities:       0
     HTML::Parser:         3.40
     HTTP::Cookies:        0
     HTTP::Headers::Util:  0
+    HTTP::Message:        5.827
     HTTP::Request:        0
     HTTP::Response:       1.50
     Locale::Country:      0
@@ -32,25 +35,26 @@ requires:
     LWP::RobotUA:         1.19
     LWP::UserAgent:       0
     Net::hostent:         0
+    Net::HTTP::Methods:   5.833
     Net::IP:              0
     Socket:               0
     Term::ReadKey:        2
     Test::More:           0
     Text::Wrap:           0
     Time::HiRes:          0
-    URI:                  1.31
+    URI:                  1.53
     URI::Escape:          0
     URI::file:            0
 resources:
     bugtracker:   http://www.w3.org/Bugs/Public/
     homepage:     http://validator.w3.org/checklink
     MailingList:  http://lists.w3.org/Archives/Public/www-validator/
-    repository:   http://dev.w3.org/cvsweb/perl/modules/W3C/LinkChecker/
+    repository:   http://dvcs.w3.org/hg/link-checker/
 no_index:
     directory:
         - t
         - inc
-generated_by:       ExtUtils::MakeMaker version 6.55_02
+generated_by:       ExtUtils::MakeMaker version 6.56
 meta-spec:
     url:      http://module-build.sourceforge.net/META-spec-v1.4.html
     version:  1.4

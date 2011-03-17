@@ -14,15 +14,18 @@ WriteMakefile(
         CSS::DOM::Constants => 0,
         CSS::DOM::Style     => 0,
         CSS::DOM::Util      => 0,
+        Encode              => 0,
         HTML::Entities      => 0,
         HTML::Parser        => "3.40",
         HTTP::Headers::Util => 0,
+        HTTP::Message       => 5.827,
         HTTP::Request       => 0,
         HTTP::Response      => "1.50",
         LWP::RobotUA        => 1.19,
         LWP::UserAgent      => 0,
+        Net::HTTP::Methods  => 5.833,
         Time::HiRes         => 0,
-        URI                 => 1.31,
+        URI                 => 1.53,
         URI::Escape         => 0,
 
         # Optional, but required if using a config file:
@@ -42,9 +45,12 @@ WriteMakefile(
         # Optional, used for password input in command line mode:
         Term::ReadKey => 2.00,
 
-        # Optional, used for guessing language in cmd line mode:
+        # Optional, used for guessing language in command line mode:
         Locale::Country  => 0,
         Locale::Language => 0,
+
+        # Optional, used when decoding arguments in command line mode:
+        Encode::Locale => 0,
 
         # Optional, but required in CGI mode:
         CGI         => 0,
@@ -66,27 +72,19 @@ WriteMakefile(
         resources => {
             homepage   => 'http://validator.w3.org/checklink',
             bugtracker => 'http://www.w3.org/Bugs/Public/',
-            repository =>
-                'http://dev.w3.org/cvsweb/perl/modules/W3C/LinkChecker/',
+            repository => 'http://dvcs.w3.org/hg/link-checker/',
             MailingList =>
                 'http://lists.w3.org/Archives/Public/www-validator/',
         },
     },
-    depend => {distdir  => 'ChangeLog lib/W3C/LinkChecker.pm'},
+    depend => {distdir  => 'lib/W3C/LinkChecker.pm'},
     dist   => {TARFLAGS => '--owner=0 --group=0 -cvf'},
-    clean  => {FILES    => 'ChangeLog.bak Makefile.PL.bak bin/checklink.bak'},
+    clean  => {FILES    => 'Makefile.PL.bak bin/checklink.bak'},
 );
 
 sub MY::postamble
 {
     return <<'MAKE_FRAG';
-ChangeLog: bin/checklink bin/checklink.pod docs/checklink.html docs/linkchecker.css README t/00compile.t etc/usermap
-	cvs2cl --FSF --utc --prune --usermap etc/usermap \
-	  --ignore ChangeLog --ignore cvsignore --ignore SIGNATURE \
-	  --ignore Makefile.PL --ignore META.yml --ignore MANIFEST \
-	  --ignore NEWS --ignore tests --ignore etc/usermap
-	$(RM_F) ChangeLog.bak
-
 lib/W3C/LinkChecker.pm: Makefile.PL bin/checklink
 	$(MKPATH) lib/W3C
 	$(ECHO) "# Dummy module for CPAN indexing purposes."  > $@

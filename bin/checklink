@@ -238,6 +238,7 @@ use constant LINK_ATTRS => {
     a => ['href'],
 
     # base/@href intentionally not checked
+    # http://www.w3.org/mid/200802091439.27764.ville.skytta%40iki.fi
     area       => ['href'],
     audio      => ['src'],
     blockquote => ['cite'],
@@ -294,7 +295,7 @@ BEGIN {
     # Version info
     $PACKAGE  = 'W3C Link Checker';
     $PROGRAM  = 'W3C-checklink';
-    $VERSION  = '4.8';
+    $VERSION  = '4.81';
     $REVISION = sprintf('version %s (c) 1999-2011 W3C', $VERSION);
     $AGENT    = sprintf(
         '%s/%s %s',
@@ -1180,8 +1181,8 @@ EOF
     $processed{$response->{absolute_uri}} = 1;
 
     # Parse the document
-    my $p = &parse_document($uri, $response->{absolute_uri},
-        $response, 1, ($depth != 0));
+    my $p =
+        &parse_document($uri, $response->base(), $response, 1, ($depth != 0));
     my $base = URI->new($p->{base});
 
     # Check anchors
@@ -1235,9 +1236,10 @@ EOF
         my $fragment  = $canon_uri->fragment(undef);
         if (!defined($Opts{Exclude}) || $canon_uri !~ $Opts{Exclude}) {
             if (!exists($links{$canon_uri})) {
-                my $hostport =
-                    $canon_uri->can('host_port') ? $canon_uri->host_port() :
-                                                   '';
+                my $hostport;
+                $hostport = $canon_uri->host_port()
+                    if $canon_uri->can('host_port');
+                $hostport = '' unless defined $hostport;
                 push(@{$hostlinks{$hostport}}, $canon_uri);
             }
             for my $line_num (keys(%$lines)) {
@@ -1301,22 +1303,22 @@ EOF
 
             # List the broken fragments
             while (my ($fragment, $lines) = each(%{$ulinks->{fragments}})) {
+
+                my $fragment_ok = $results{$u}{fragments}{$fragment};
+
                 if ($Opts{Verbose}) {
                     my @line_nums = sort { $a <=> $b } keys(%$lines);
                     &hprintf(
                         "\t\t%s %s - Line%s: %s\n",
                         $fragment,
-                        ($results{$u}{fragments}{$fragment}) ? 'OK' :
-                            'Not found',
-                        (scalar(@line_nums) > 1) ? 's' : '',
+                        $fragment_ok             ? 'OK' : 'Not found',
+                        (scalar(@line_nums) > 1) ? 's'  : '',
                         join(', ', @line_nums)
                     );
                 }
 
                 # A broken fragment?
-                if ($results{$u}{fragments}{$fragment} == 0) {
-                    $broken{$u}{fragments}{$fragment} += 2;
-                }
+                $broken{$u}{fragments}{$fragment} += 2 unless $fragment_ok;
             }
         }
         elsif (!($Opts{Quiet} && &informational($results{$u}{location}{code})))
@@ -2032,8 +2034,19 @@ sub start
 
         my $tag_local_base = undef;
 
+        # Special case: base/@href
+        # @@@TODO: The reason for handling <base href> ourselves is that LWP's
+        # head parsing magic fails at least for responses that have
+        # Content-Encodings: https://rt.cpan.org/Ticket/Display.html?id=54361
+        if ($tag eq 'base') {
+
+            # Ignore <base> with missing/empty href.
+            $self->{base} = $attr->{href}
+                if (defined($attr->{href}) && length($attr->{href}));
+        }
+
         # Special case: meta[@http-equiv=Refresh]/@content
-        if ($tag eq 'meta') {
+        elsif ($tag eq 'meta') {
             if ($attr->{'http-equiv'} &&
                 lc($attr->{'http-equiv'}) eq 'refresh')
             {
